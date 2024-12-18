@@ -1,3 +1,5 @@
+#[cfg(feature = "cached-base-rewards")]
+use crate::altair::helpers::get_flag_index_deltas_with_base_rewards;
 use crate::{
     altair::{
         constants::{PARTICIPATION_FLAG_WEIGHTS, TIMELY_TARGET_FLAG_INDEX},

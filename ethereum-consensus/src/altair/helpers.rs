@@ -313,6 +313,64 @@ pub fn get_flag_index_deltas<
     Ok((rewards, penalties))
 }
 
+#[cfg(feature = "cached-base-rewards")]
+pub fn get_flag_index_deltas_with_base_rewards<
+    const SLOTS_PER_HISTORICAL_ROOT: usize,
+    const HISTORICAL_ROOTS_LIMIT: usize,
+    const ETH1_DATA_VOTES_BOUND: usize,
+    const VALIDATOR_REGISTRY_LIMIT: usize,
+    const EPOCHS_PER_HISTORICAL_VECTOR: usize,
+    const EPOCHS_PER_SLASHINGS_VECTOR: usize,
+    const MAX_VALIDATORS_PER_COMMITTEE: usize,
+    const SYNC_COMMITTEE_SIZE: usize,
+>(
+    state: &BeaconState<
+        SLOTS_PER_HISTORICAL_ROOT,
+        HISTORICAL_ROOTS_LIMIT,
+        ETH1_DATA_VOTES_BOUND,
+        VALIDATOR_REGISTRY_LIMIT,
+        EPOCHS_PER_HISTORICAL_VECTOR,
+        EPOCHS_PER_SLASHINGS_VECTOR,
+        MAX_VALIDATORS_PER_COMMITTEE,
+        SYNC_COMMITTEE_SIZE,
+    >,
+    flag_index: usize,
+    base_rewards: &[Gwei],
+    context: &Context,
+) -> Result<(Vec<Gwei>, Vec<Gwei>)> {
+    let validator_count = state.validators.len();
+    let mut rewards = vec![0; validator_count];
+    let mut penalties = vec![0; validator_count];
+
+    let previous_epoch = get_previous_epoch(state, context);
+    let unslashed_participating_indices =
+        get_unslashed_participating_indices(state, flag_index, previous_epoch, context)?;
+    let weight = PARTICIPATION_FLAG_WEIGHTS[flag_index];
+
+    let unslashed_participating_balance =
+        get_total_balance(state, &unslashed_participating_indices, context)?;
+    let unslashed_participating_increments =
+        unslashed_participating_balance / context.effective_balance_increment;
+    let active_increments =
+        get_total_active_balance(state, context)? / context.effective_balance_increment;
+    let not_leaking = !is_in_inactivity_leak(state, context);
+
+    for index in get_eligible_validator_indices(state, context) {
+        let base_reward = base_rewards[index];
+
+        if unslashed_participating_indices.contains(&index) {
+            if not_leaking {
+                let reward_numerator = base_reward * weight * unslashed_participating_increments;
+                rewards[index] += reward_numerator / (active_increments * WEIGHT_DENOMINATOR);
+            }
+        } else if flag_index != TIMELY_HEAD_FLAG_INDEX {
+            penalties[index] += base_reward * weight / WEIGHT_DENOMINATOR;
+        }
+    }
+
+    Ok((rewards, penalties))
+}
+
 pub fn get_inactivity_penalty_deltas<
     const SLOTS_PER_HISTORICAL_ROOT: usize,
     const HISTORICAL_ROOTS_LIMIT: usize,
